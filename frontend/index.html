@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>GeoPulse AI — Demo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   :root {
     --green: #2e7d32;
@@ -14,81 +16,40 @@
     --muted: #607d8b;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-  }
-  header {
-    background: linear-gradient(120deg, var(--green), #1b5e20);
-    color: white;
-    padding: 28px 20px;
-    text-align: center;
-  }
+  body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: linear-gradient(120deg, var(--green), #1b5e20); color: white; padding: 28px 20px; text-align: center; }
   header h1 { margin: 0 0 6px; font-size: 1.6rem; }
   header p { margin: 0; opacity: 0.9; font-size: 0.95rem; }
-  main {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: 20px;
-  }
-  .card {
-    background: var(--card);
-    border-radius: 14px;
-    padding: 20px;
-    margin-bottom: 18px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
-  }
+  main { max-width: 680px; margin: 0 auto; padding: 20px; }
+  .card { background: var(--card); border-radius: 14px; padding: 20px; margin-bottom: 18px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
   label { font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 4px; }
-  input {
-    width: 100%;
-    padding: 10px 12px;
-    border: 1px solid #cfd8dc;
-    border-radius: 8px;
-    font-size: 0.95rem;
-    margin-bottom: 12px;
+  input, select {
+    width: 100%; padding: 10px 12px; border: 1px solid #cfd8dc; border-radius: 8px;
+    font-size: 0.95rem; margin-bottom: 12px; background: white;
   }
   .row { display: flex; gap: 12px; }
   .row > div { flex: 1; }
   button {
-    background: var(--green);
-    color: white;
-    border: none;
-    padding: 12px 16px;
-    border-radius: 10px;
-    font-size: 1rem;
-    width: 100%;
-    cursor: pointer;
-    transition: background 0.15s;
+    background: var(--green); color: white; border: none; padding: 12px 16px;
+    border-radius: 10px; font-size: 1rem; width: 100%; cursor: pointer; transition: background 0.15s;
   }
   button:hover { background: #1b5e20; }
-  .result-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-top: 8px;
-  }
-  .stat {
-    background: var(--green-light);
-    border-radius: 10px;
-    padding: 12px;
-  }
+  button.secondary { background: var(--brown); }
+  button.secondary:hover { background: #4e342e; }
+  .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .stat { background: var(--green-light); border-radius: 10px; padding: 12px; }
   .stat .label { font-size: 0.75rem; color: var(--muted); }
   .stat .value { font-size: 1.15rem; font-weight: 600; color: var(--green); }
-  .tag {
-    display: inline-block;
-    background: #fff3e0;
-    color: var(--brown);
-    padding: 4px 10px;
-    border-radius: 20px;
-    font-size: 0.8rem;
-    margin: 3px 4px 0 0;
-  }
+  .tag { display: inline-block; background: #fff3e0; color: var(--brown); padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; margin: 3px 4px 0 0; }
   .advice { font-size: 0.9rem; margin-top: 10px; color: var(--text); }
+  .summary { background: #f1f8e9; border-left: 4px solid var(--green); border-radius: 8px; padding: 12px 14px; margin-top: 12px; font-size: 0.92rem; white-space: pre-wrap; }
+  .source-note { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
   .hidden { display: none; }
   .loading { text-align: center; color: var(--muted); font-size: 0.9rem; }
   h3 { margin: 0 0 6px; font-size: 1.05rem; }
+  #map { height: 320px; border-radius: 12px; margin-bottom: 12px; }
+  .coords-note { font-size: 0.8rem; color: var(--muted); margin: -6px 0 10px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--green); color: white; padding: 12px 20px; border-radius: 30px; font-size: 0.9rem; box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 2000; }
 </style>
 </head>
 <body>
@@ -99,116 +60,220 @@
 </header>
 
 <main>
+
+  <!-- 1. Map picker -->
   <div class="card">
-    <h3>Check a Location</h3>
-    <label for="village">Village / Location name (optional)</label>
-    <input id="village" placeholder="e.g. Rampur" />
+    <h3>📍 Pick a location</h3>
+    <p class="coords-note">Tap anywhere on the map — or type coordinates below.</p>
+    <div id="map"></div>
     <div class="row">
       <div>
-        <label for="lat">Latitude</label>
-        <input id="lat" value="17.385" />
+        <label>Latitude</label>
+        <input id="lat" type="number" step="0.0001" value="16.5062" />
       </div>
       <div>
-        <label for="lon">Longitude</label>
-        <input id="lon" value="78.4867" />
+        <label>Longitude</label>
+        <input id="lon" type="number" step="0.0001" value="80.6480" />
       </div>
     </div>
-    <button onclick="runAdvisory()">Get Advisory</button>
-  </div>
-
-  <div id="loading" class="loading hidden">Analyzing soil, groundwater & weather data...</div>
-
-  <div id="results" class="hidden">
-    <div class="card">
-      <h3>💧 Groundwater & Soil</h3>
-      <div class="result-grid">
-        <div class="stat"><div class="label">Estimated Depth</div><div class="value" id="depth">—</div></div>
-        <div class="stat"><div class="label">Water Probability</div><div class="value" id="prob">—</div></div>
-        <div class="stat"><div class="label">Soil Profile</div><div class="value" id="soil">—</div></div>
-        <div class="stat"><div class="label">Nearby Success Rate</div><div class="value" id="success">—</div></div>
+    <div class="row">
+      <div>
+        <label>Village name (optional)</label>
+        <input id="village" type="text" placeholder="e.g. Penamaluru" />
+      </div>
+      <div>
+        <label>Advisory language</label>
+        <select id="language">
+          <option value="en">English</option>
+          <option value="te">తెలుగు (Telugu)</option>
+          <option value="hi">हिन्दी (Hindi)</option>
+        </select>
       </div>
     </div>
-
-    <div class="card">
-      <h3>🌱 Recommended Crops</h3>
-      <div id="crops"></div>
-      <div class="advice" id="irrigation"></div>
-    </div>
-
-    <div class="card">
-      <h3>☁️ Dry-Spell Alert</h3>
-      <div class="advice" id="dryspell"></div>
-    </div>
-
-    <div class="card">
-      <h3>📸 Crop Health Check (demo)</h3>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:0;">
-        In the full app, a farmer uploads a photo or voice note here. This demo simulates the AI diagnosis step.
-      </p>
-      <button onclick="runCropHealth()">Simulate Crop Health Log</button>
-      <div class="advice" id="health"></div>
-    </div>
+    <button onclick="getAdvisory()">Get Land &amp; Crop Advisory</button>
   </div>
+
+  <!-- Advisory result -->
+  <div class="card hidden" id="advisoryCard">
+    <h3>🧠 Advisory Result</h3>
+    <div class="loading hidden" id="advisoryLoading">Analyzing the land…</div>
+    <div id="advisoryResult"></div>
+  </div>
+
+  <!-- 2. Dry spell -->
+  <div class="card">
+    <h3>🌦️ Dry-Spell Alert</h3>
+    <button class="secondary" onclick="getDrySpell()">Check Dry-Spell Risk Here</button>
+    <div class="advice" id="drySpellResult"></div>
+  </div>
+
+  <!-- 3. Crop health -->
+  <div class="card">
+    <h3>🌱 Crop Health Check (AI)</h3>
+    <label>Describe the problem you see</label>
+    <input id="farmerNote" type="text" placeholder="e.g. Yellow spots on cotton leaves, spreading fast" />
+    <button class="secondary" onclick="checkCropHealth()">Get AI Diagnosis</button>
+    <div class="advice" id="cropHealthResult"></div>
+  </div>
+
+  <!-- 4. Borewell logging (Digital Underground Twin) -->
+  <div class="card">
+    <h3>🕳️ Log a Borewell Record</h3>
+    <p class="coords-note">Every record improves the advisory for nearby farmers — log one, then re-run the advisory above and watch the estimate change. Uses the location selected on the map.</p>
+    <div class="row">
+      <div>
+        <label>Total depth drilled (ft)</label>
+        <input id="bwDepth" type="number" value="300" />
+      </div>
+      <div>
+        <label>Water strike depth (ft)</label>
+        <input id="bwStrike" type="number" value="210" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Soil layers</label>
+        <input id="bwSoil" type="text" value="Red soil → gravel → granite" />
+      </div>
+      <div>
+        <label>Yield (litres/hour)</label>
+        <input id="bwYield" type="number" value="2500" />
+      </div>
+    </div>
+    <label>Operator name (optional)</label>
+    <input id="bwOperator" type="text" placeholder="e.g. Srinivas Borewells" />
+    <button onclick="logBorewell()">Log Borewell Record</button>
+    <div class="advice" id="borewellResult"></div>
+  </div>
+
 </main>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const API_BASE = "http://localhost:8000";
+const API = "http://localhost:8000";
 
-async function runAdvisory() {
-  const lat = parseFloat(document.getElementById('lat').value);
-  const lon = parseFloat(document.getElementById('lon').value);
-  const village = document.getElementById('village').value;
+// ---------- Map ----------
+const startLat = 16.5062, startLon = 80.6480; // Vijayawada region
+const map = L.map('map').setView([startLat, startLon], 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
 
-  document.getElementById('loading').classList.remove('hidden');
-  document.getElementById('results').classList.add('hidden');
+let marker = L.marker([startLat, startLon], { draggable: true }).addTo(map);
+const borewellLayer = L.layerGroup().addTo(map);
 
+function setCoords(lat, lon) {
+  document.getElementById('lat').value = lat.toFixed(4);
+  document.getElementById('lon').value = lon.toFixed(4);
+}
+map.on('click', e => { marker.setLatLng(e.latlng); setCoords(e.latlng.lat, e.latlng.lng); });
+marker.on('dragend', () => { const p = marker.getLatLng(); setCoords(p.lat, p.lng); });
+
+function currentCoords() {
+  return {
+    latitude: parseFloat(document.getElementById('lat').value),
+    longitude: parseFloat(document.getElementById('lon').value),
+  };
+}
+
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+async function post(path, body) {
+  const res = await fetch(API + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error('API error ' + res.status);
+  return res.json();
+}
+
+// ---------- 1. Advisory ----------
+async function getAdvisory() {
+  const card = document.getElementById('advisoryCard');
+  const loading = document.getElementById('advisoryLoading');
+  const out = document.getElementById('advisoryResult');
+  card.classList.remove('hidden'); loading.classList.remove('hidden'); out.innerHTML = '';
   try {
-    const [advisoryRes, drySpellRes] = await Promise.all([
-      fetch(`${API_BASE}/api/v1/advisory`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({latitude: lat, longitude: lon, village_name: village})
-      }).then(r => r.json()),
-      fetch(`${API_BASE}/api/v1/dry-spell-alert`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({latitude: lat, longitude: lon})
-      }).then(r => r.json())
-    ]);
-
-    document.getElementById('depth').textContent = advisoryRes.groundwater.estimated_depth_ft + ' ft';
-    document.getElementById('prob').textContent = Math.round(advisoryRes.groundwater.groundwater_probability * 100) + '%';
-    document.getElementById('soil').textContent = advisoryRes.groundwater.soil_profile;
-    document.getElementById('success').textContent = advisoryRes.groundwater.nearby_borewell_success_rate_pct + '%';
-
-    document.getElementById('crops').innerHTML = advisoryRes.recommended_crops
-      .map(c => `<span class="tag">${c}</span>`).join('');
-    document.getElementById('irrigation').textContent = advisoryRes.irrigation_advice;
-
-    document.getElementById('dryspell').textContent = drySpellRes.message;
-
-    document.getElementById('health').textContent = '';
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('results').classList.remove('hidden');
+    const data = await post('/api/v1/advisory', {
+      ...currentCoords(),
+      village_name: document.getElementById('village').value || null,
+      language: document.getElementById('language').value,
+    });
+    const gw = data.groundwater;
+    out.innerHTML = `
+      <div class="result-grid">
+        <div class="stat"><div class="label">Estimated water depth</div><div class="value">${gw.estimated_depth_ft} ft</div></div>
+        <div class="stat"><div class="label">Groundwater probability</div><div class="value">${Math.round(gw.groundwater_probability * 100)}%</div></div>
+        <div class="stat"><div class="label">Soil profile</div><div class="value" style="font-size:0.95rem">${gw.soil_profile}</div></div>
+        <div class="stat"><div class="label">Nearby success rate</div><div class="value">${gw.nearby_borewell_success_rate_pct}%</div></div>
+      </div>
+      <div class="advice"><strong>Recommended crops:</strong><br>
+        ${data.recommended_crops.map(c => `<span class="tag">${c}</span>`).join('')}
+      </div>
+      <div class="advice">💧 ${data.irrigation_advice}</div>
+      ${data.farmer_summary ? `<div class="summary">🤖 ${data.farmer_summary}</div>` : ''}
+      <div class="source-note">Data: ${gw.data_source} · Summary: ${data.summary_source === 'gemini' ? 'Gemini AI' : 'rule-based'}</div>
+    `;
   } catch (e) {
-    document.getElementById('loading').textContent = 'Could not reach API — is the backend running on ' + API_BASE + '?';
+    out.innerHTML = `<div class="advice">⚠️ Could not reach the backend at ${API}. Is it running?</div>`;
+  } finally {
+    loading.classList.add('hidden');
   }
 }
 
-async function runCropHealth() {
-  const lat = parseFloat(document.getElementById('lat').value);
-  const lon = parseFloat(document.getElementById('lon').value);
-  const res = await fetch(`${API_BASE}/api/v1/crop-health`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({latitude: lat, longitude: lon})
-  }).then(r => r.json());
+// ---------- 2. Dry spell ----------
+async function getDrySpell() {
+  const out = document.getElementById('drySpellResult');
+  out.textContent = 'Checking…';
+  try {
+    const data = await post('/api/v1/dry-spell-alert', currentCoords());
+    out.innerHTML = `<strong>Risk: ${data.dry_spell_risk}</strong> — ${data.message}`;
+  } catch (e) { out.textContent = '⚠️ Backend not reachable.'; }
+}
 
-  document.getElementById('health').innerHTML =
-    `<strong>AI diagnosis:</strong> ${res.ai_preliminary_diagnosis} (confidence ${Math.round(res.confidence*100)}%)<br>` +
-    (res.routed_to_rythu_seva_kendra
-      ? `Routed to: ${res.nearest_kendra}`
-      : 'No expert follow-up needed.');
+// ---------- 3. Crop health ----------
+async function checkCropHealth() {
+  const out = document.getElementById('cropHealthResult');
+  out.textContent = 'Analyzing…';
+  try {
+    const data = await post('/api/v1/crop-health', {
+      ...currentCoords(),
+      farmer_note: document.getElementById('farmerNote').value || null,
+      language: document.getElementById('language').value,
+    });
+    out.innerHTML = `
+      <strong>Diagnosis (${data.ai_source === 'gemini' ? 'Gemini AI' : 'demo model'}):</strong> ${data.ai_preliminary_diagnosis}<br>
+      Confidence: ${Math.round(data.confidence * 100)}%
+      ${data.routed_to_rythu_seva_kendra ? `<br>📮 Routed to: ${data.nearest_kendra}` : ''}
+    `;
+  } catch (e) { out.textContent = '⚠️ Backend not reachable.'; }
+}
+
+// ---------- 4. Borewell logging ----------
+async function logBorewell() {
+  const out = document.getElementById('borewellResult');
+  const coords = currentCoords();
+  try {
+    const data = await post('/api/v1/borewell-log', {
+      ...coords,
+      depth_ft: parseFloat(document.getElementById('bwDepth').value),
+      soil_layers: document.getElementById('bwSoil').value,
+      water_strike_depth_ft: parseFloat(document.getElementById('bwStrike').value) || null,
+      yield_lph: parseFloat(document.getElementById('bwYield').value) || null,
+      operator_name: document.getElementById('bwOperator').value || null,
+    });
+    out.innerHTML = `✅ Logged. Total records in the Digital Underground Twin: <strong>${data.total_records}</strong>. Now re-run the advisory above — the estimate will use this record.`;
+    L.circleMarker([coords.latitude, coords.longitude], {
+      radius: 7, color: '#6d4c41', fillColor: '#8d6e63', fillOpacity: 0.9
+    }).bindPopup(`Borewell · strike at ${document.getElementById('bwStrike').value} ft`).addTo(borewellLayer);
+    toast('Borewell record added to the Underground Twin');
+  } catch (e) { out.textContent = '⚠️ Backend not reachable.'; }
 }
 </script>
 </body>
