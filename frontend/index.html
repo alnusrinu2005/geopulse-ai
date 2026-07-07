@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>GeoPulse AI — Demo</title>
+<style>
+  :root {
+    --green: #2e7d32;
+    --green-light: #e8f5e9;
+    --brown: #6d4c41;
+    --bg: #fafaf7;
+    --card: #ffffff;
+    --text: #263238;
+    --muted: #607d8b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    background: linear-gradient(120deg, var(--green), #1b5e20);
+    color: white;
+    padding: 28px 20px;
+    text-align: center;
+  }
+  header h1 { margin: 0 0 6px; font-size: 1.6rem; }
+  header p { margin: 0; opacity: 0.9; font-size: 0.95rem; }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .card {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 18px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+  }
+  label { font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 4px; }
+  input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #cfd8dc;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+  }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  button {
+    background: var(--green);
+    color: white;
+    border: none;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-size: 1rem;
+    width: 100%;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #1b5e20; }
+  .result-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .stat {
+    background: var(--green-light);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .stat .label { font-size: 0.75rem; color: var(--muted); }
+  .stat .value { font-size: 1.15rem; font-weight: 600; color: var(--green); }
+  .tag {
+    display: inline-block;
+    background: #fff3e0;
+    color: var(--brown);
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    margin: 3px 4px 0 0;
+  }
+  .advice { font-size: 0.9rem; margin-top: 10px; color: var(--text); }
+  .hidden { display: none; }
+  .loading { text-align: center; color: var(--muted); font-size: 0.9rem; }
+  h3 { margin: 0 0 6px; font-size: 1.05rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🌾 GeoPulse AI</h1>
+  <p>Know Your Land — Before You Dig, Plant, or Invest.</p>
+</header>
+
+<main>
+  <div class="card">
+    <h3>Check a Location</h3>
+    <label for="village">Village / Location name (optional)</label>
+    <input id="village" placeholder="e.g. Rampur" />
+    <div class="row">
+      <div>
+        <label for="lat">Latitude</label>
+        <input id="lat" value="17.385" />
+      </div>
+      <div>
+        <label for="lon">Longitude</label>
+        <input id="lon" value="78.4867" />
+      </div>
+    </div>
+    <button onclick="runAdvisory()">Get Advisory</button>
+  </div>
+
+  <div id="loading" class="loading hidden">Analyzing soil, groundwater & weather data...</div>
+
+  <div id="results" class="hidden">
+    <div class="card">
+      <h3>💧 Groundwater & Soil</h3>
+      <div class="result-grid">
+        <div class="stat"><div class="label">Estimated Depth</div><div class="value" id="depth">—</div></div>
+        <div class="stat"><div class="label">Water Probability</div><div class="value" id="prob">—</div></div>
+        <div class="stat"><div class="label">Soil Profile</div><div class="value" id="soil">—</div></div>
+        <div class="stat"><div class="label">Nearby Success Rate</div><div class="value" id="success">—</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>🌱 Recommended Crops</h3>
+      <div id="crops"></div>
+      <div class="advice" id="irrigation"></div>
+    </div>
+
+    <div class="card">
+      <h3>☁️ Dry-Spell Alert</h3>
+      <div class="advice" id="dryspell"></div>
+    </div>
+
+    <div class="card">
+      <h3>📸 Crop Health Check (demo)</h3>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:0;">
+        In the full app, a farmer uploads a photo or voice note here. This demo simulates the AI diagnosis step.
+      </p>
+      <button onclick="runCropHealth()">Simulate Crop Health Log</button>
+      <div class="advice" id="health"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const API_BASE = "http://localhost:8000";
+
+async function runAdvisory() {
+  const lat = parseFloat(document.getElementById('lat').value);
+  const lon = parseFloat(document.getElementById('lon').value);
+  const village = document.getElementById('village').value;
+
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('results').classList.add('hidden');
+
+  try {
+    const [advisoryRes, drySpellRes] = await Promise.all([
+      fetch(`${API_BASE}/api/v1/advisory`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({latitude: lat, longitude: lon, village_name: village})
+      }).then(r => r.json()),
+      fetch(`${API_BASE}/api/v1/dry-spell-alert`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({latitude: lat, longitude: lon})
+      }).then(r => r.json())
+    ]);
+
+    document.getElementById('depth').textContent = advisoryRes.groundwater.estimated_depth_ft + ' ft';
+    document.getElementById('prob').textContent = Math.round(advisoryRes.groundwater.groundwater_probability * 100) + '%';
+    document.getElementById('soil').textContent = advisoryRes.groundwater.soil_profile;
+    document.getElementById('success').textContent = advisoryRes.groundwater.nearby_borewell_success_rate_pct + '%';
+
+    document.getElementById('crops').innerHTML = advisoryRes.recommended_crops
+      .map(c => `<span class="tag">${c}</span>`).join('');
+    document.getElementById('irrigation').textContent = advisoryRes.irrigation_advice;
+
+    document.getElementById('dryspell').textContent = drySpellRes.message;
+
+    document.getElementById('health').textContent = '';
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('results').classList.remove('hidden');
+  } catch (e) {
+    document.getElementById('loading').textContent = 'Could not reach API — is the backend running on ' + API_BASE + '?';
+  }
+}
+
+async function runCropHealth() {
+  const lat = parseFloat(document.getElementById('lat').value);
+  const lon = parseFloat(document.getElementById('lon').value);
+  const res = await fetch(`${API_BASE}/api/v1/crop-health`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({latitude: lat, longitude: lon})
+  }).then(r => r.json());
+
+  document.getElementById('health').innerHTML =
+    `<strong>AI diagnosis:</strong> ${res.ai_preliminary_diagnosis} (confidence ${Math.round(res.confidence*100)}%)<br>` +
+    (res.routed_to_rythu_seva_kendra
+      ? `Routed to: ${res.nearest_kendra}`
+      : 'No expert follow-up needed.');
+}
+</script>
+</body>
+</html>
