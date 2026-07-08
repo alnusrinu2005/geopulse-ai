@@ -18,6 +18,7 @@ from typing import Optional
 import requests as http_requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="GeoPulse AI Demo API")
@@ -312,6 +313,12 @@ class CropHealthRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints — mapped 1:1 to the Kisan Alert challenge's 3 components
 # ---------------------------------------------------------------------------
+@app.get("/app")
+def serve_frontend():
+    """Serve the demo UI from the same server — one URL for judges."""
+    return FileResponse(_Path(__file__).parent.parent / "frontend" / "index.html")
+
+
 @app.get("/")
 def root():
     return {

@@ -178,7 +178,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const API = "http://localhost:8000";
+const API = window.location.protocol.startsWith('http') ? window.location.origin : 'http://localhost:8000';
 
 // ---------- Map ----------
 const startLat = 16.5062, startLon = 80.6480; // Vijayawada region
