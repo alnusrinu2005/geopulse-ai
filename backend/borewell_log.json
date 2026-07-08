@@ -1,0 +1,26 @@
+[
+ {
+  "latitude": 17.7461,
+  "longitude": 83.334,
+  "depth_ft": 300.0,
+  "soil_layers": "Red soil \u2192 gravel \u2192 granite",
+  "water_strike_depth_ft": 210.0,
+  "yield_lph": 2500.0,
+  "operator_name": "abc",
+  "water_quality_tds_ppm": 300.0,
+  "layer_notes": "150",
+  "logged_at": "2026-07-08T06:33:44.611477"
+ },
+ {
+  "latitude": 17.7423,
+  "longitude": 83.3357,
+  "depth_ft": 300.0,
+  "soil_layers": "Red soil \u2192 gravel \u2192 granite",
+  "water_strike_depth_ft": 210.0,
+  "yield_lph": 2500.0,
+  "operator_name": "srinu",
+  "water_quality_tds_ppm": 250.0,
+  "layer_notes": "180",
+  "logged_at": "2026-07-08T06:36:48.666844"
+ }
+]

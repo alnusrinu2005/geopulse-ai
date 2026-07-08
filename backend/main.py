@@ -33,37 +33,91 @@ app.add_middleware(
 # Gemini (Google AI) integration
 # ---------------------------------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent"
-)
+# Model candidates tried in order; the first one that works is cached and reused.
+# Override with GEMINI_MODEL env var if you want a specific model.
+_env_model = os.environ.get("GEMINI_MODEL", "").strip()
+GEMINI_MODEL_CANDIDATES = ([_env_model] if _env_model else []) + [
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+]
+_working_model: Optional[str] = None
 
 LANGUAGE_NAMES = {"en": "English", "te": "Telugu", "hi": "Hindi"}
 
 
-def gemini_generate(prompt: str) -> Optional[str]:
-    """Call Gemini. Returns None if no key or on any error (caller falls back)."""
+def gemini_generate(prompt: str, image_base64: Optional[str] = None,
+                    image_mime: str = "image/jpeg") -> Optional[str]:
+    """Call Gemini (text, or text+image). Returns None if no key or on any error.
+    Tries several model names (Google retires old ones) and prints the real
+    error to the terminal so failures are never silent."""
+    global _working_model
     if not GEMINI_API_KEY:
         return None
+    parts = [{"text": prompt}]
+    if image_base64:
+        parts.append({"inline_data": {"mime_type": image_mime, "data": image_base64}})
+
+    models = [_working_model] if _working_model else GEMINI_MODEL_CANDIDATES
+    for model in models:
+        try:
+            resp = http_requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                params={"key": GEMINI_API_KEY},
+                json={"contents": [{"parts": parts}]},
+                timeout=30,
+            )
+            if resp.status_code == 404:
+                print(f"[gemini] model '{model}' not found (404), trying next…")
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if _working_model != model:
+                _working_model = model
+                print(f"[gemini] using model: {model}")
+            return text
+        except http_requests.exceptions.HTTPError:
+            print(f"[gemini] HTTP {resp.status_code} from '{model}': {resp.text[:300]}")
+            if resp.status_code in (400, 401, 403, 429):
+                return None  # key/quota problem — other models won't help
+            continue
+        except Exception as e:
+            print(f"[gemini] error calling '{model}': {e}")
+            continue
+    print("[gemini] all model candidates failed — falling back to rule-based")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Crowdsourced borewell store — persisted to a JSON file so records survive
+# backend restarts (incl. uvicorn --reload restarts on file save).
+# ---------------------------------------------------------------------------
+import json as _json
+from pathlib import Path as _Path
+
+_STORE_FILE = _Path(__file__).parent / "borewell_log.json"
+
+
+def _load_borewell_log() -> list[dict]:
     try:
-        resp = http_requests.post(
-            GEMINI_URL,
-            params={"key": GEMINI_API_KEY},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception:
-        return None
+        if _STORE_FILE.exists():
+            return _json.loads(_STORE_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[store] could not read {_STORE_FILE.name}: {e}")
+    return []
 
 
-# ---------------------------------------------------------------------------
-# In-memory "crowdsourced borewell" store (seed data for demo)
-# ---------------------------------------------------------------------------
-BOREWELL_LOG: list[dict] = []
+def _save_borewell_log() -> None:
+    try:
+        _STORE_FILE.write_text(_json.dumps(BOREWELL_LOG, indent=1), encoding="utf-8")
+    except Exception as e:
+        print(f"[store] could not write {_STORE_FILE.name}: {e}")
+
+
+BOREWELL_LOG: list[dict] = _load_borewell_log()
+print(f"[store] loaded {len(BOREWELL_LOG)} borewell record(s) from {_STORE_FILE.name}")
 
 SOIL_TYPES = ["Red loamy soil", "Black cotton soil", "Sandy loam", "Alluvial soil", "Laterite soil"]
 
@@ -160,18 +214,68 @@ def recommend_crops(soil: str, groundwater_probability: float) -> dict:
 
 
 def dry_spell_alert(lat: float, lon: float) -> dict:
-    r = _seeded_random(lat, lon, "weather")
-    risk = "High" if r > 0.7 else "Moderate" if r > 0.4 else "Low"
-    days_to_next_rain = int(2 + r * 12)
-    return {
-        "dry_spell_risk": risk,
-        "estimated_days_to_next_rain": days_to_next_rain,
-        "message": (
-            f"Dry spell risk is {risk.lower()}. Expected rain in ~{days_to_next_rain} days. "
-            "Plan irrigation accordingly." if risk != "Low"
-            else "No significant dry spell expected in the near term."
-        ),
-    }
+    """Real 7-day forecast from Open-Meteo (free, no key). Falls back to the
+    deterministic demo model if the API is unreachable."""
+    try:
+        resp = http_requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat, "longitude": lon,
+                "daily": "precipitation_sum,precipitation_probability_max,temperature_2m_max",
+                "forecast_days": 7, "timezone": "auto",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        daily = resp.json()["daily"]
+        precip = daily["precipitation_sum"]
+        prob = daily["precipitation_probability_max"]
+        tmax = daily["temperature_2m_max"]
+        dates = daily["time"]
+
+        rain_day = next((i for i, p in enumerate(precip) if (p or 0) >= 2.0), None)
+        total_week_rain = round(sum(p or 0 for p in precip), 1)
+
+        if rain_day is None:
+            risk = "High"
+            msg = (f"No meaningful rain expected in the next 7 days "
+                   f"(total forecast: {total_week_rain} mm). Max temp up to {max(tmax)}\u00b0C. "
+                   f"Irrigate proactively and conserve water.")
+        elif rain_day >= 4:
+            risk = "Moderate"
+            msg = (f"Next rain expected around {dates[rain_day]} "
+                   f"({precip[rain_day]} mm, {prob[rain_day]}% chance). "
+                   f"Plan irrigation to bridge the gap.")
+        else:
+            risk = "Low"
+            msg = (f"Rain expected around {dates[rain_day]} "
+                   f"({precip[rain_day]} mm, {prob[rain_day]}% chance). "
+                   f"Week total forecast: {total_week_rain} mm.")
+        return {
+            "dry_spell_risk": risk,
+            "estimated_days_to_next_rain": rain_day if rain_day is not None else 7,
+            "week_total_rain_mm": total_week_rain,
+            "forecast_source": "Open-Meteo (live)",
+            "daily_forecast": [
+                {"date": dates[i], "rain_mm": precip[i], "rain_probability_pct": prob[i], "temp_max_c": tmax[i]}
+                for i in range(len(dates))
+            ],
+            "message": msg,
+        }
+    except Exception:
+        r = _seeded_random(lat, lon, "weather")
+        risk = "High" if r > 0.7 else "Moderate" if r > 0.4 else "Low"
+        days_to_next_rain = int(2 + r * 12)
+        return {
+            "dry_spell_risk": risk,
+            "estimated_days_to_next_rain": days_to_next_rain,
+            "forecast_source": "demo model (weather API unreachable)",
+            "message": (
+                f"Dry spell risk is {risk.lower()}. Expected rain in ~{days_to_next_rain} days. "
+                "Plan irrigation accordingly." if risk != "Low"
+                else "No significant dry spell expected in the near term."
+            ),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +296,8 @@ class BorewellLogRequest(BaseModel):
     water_strike_depth_ft: Optional[float] = None
     yield_lph: Optional[float] = None  # litres per hour
     operator_name: Optional[str] = None
+    water_quality_tds_ppm: Optional[float] = None  # water testing report (roadmap: full lab report upload)
+    layer_notes: Optional[str] = None  # per-layer observations (roadmap: soil test per layer, mineral indicators)
 
 
 class CropHealthRequest(BaseModel):
@@ -199,7 +305,8 @@ class CropHealthRequest(BaseModel):
     longitude: float
     farmer_note: Optional[str] = None
     language: str = "en"
-    # photo_base64: Optional[str] = None  # add when wiring real image upload
+    photo_base64: Optional[str] = None   # raw base64 (no data: prefix)
+    photo_mime: str = "image/jpeg"
 
 
 # ---------------------------------------------------------------------------
@@ -259,9 +366,20 @@ def log_crop_health(req: CropHealthRequest):
     Otherwise falls back to the deterministic demo diagnosis.
     """
     diagnosis, confidence, ai_source = None, None, "rule-based"
+    lang = LANGUAGE_NAMES.get(req.language, "English")
 
-    if req.farmer_note:
-        lang = LANGUAGE_NAMES.get(req.language, "English")
+    if req.photo_base64:
+        gemini_reply = gemini_generate(
+            f"You are a crop-health expert for Indian farmers. Analyze this crop photo"
+            f"{' along with the farmer note: ' + chr(34) + req.farmer_note + chr(34) if req.farmer_note else ''}. "
+            f"In {lang}, give: the likely disease/pest/deficiency, and one immediate action step "
+            f"(3 sentences max). If serious, recommend an expert visit. Respond with only the diagnosis.",
+            image_base64=req.photo_base64, image_mime=req.photo_mime,
+        )
+        if gemini_reply:
+            diagnosis, confidence, ai_source = gemini_reply, 0.85, "gemini-vision"
+
+    if diagnosis is None and req.farmer_note:
         gemini_reply = gemini_generate(
             f"You are a crop-health assistant for Indian farmers. A farmer reports: "
             f"\"{req.farmer_note}\". In {lang}, give a one-line likely diagnosis and one "
@@ -294,9 +412,21 @@ def log_borewell(entry: BorewellLogRequest):
     record = entry.dict()
     record["logged_at"] = datetime.utcnow().isoformat()
     BOREWELL_LOG.append(record)
+    _save_borewell_log()
     return {"message": "Borewell record logged", "total_records": len(BOREWELL_LOG), "record": record}
 
 
 @app.get("/api/v1/borewell-log")
-def list_borewell_logs():
-    return {"total_records": len(BOREWELL_LOG), "records": BOREWELL_LOG}
+def list_borewell_logs(lat: Optional[float] = None, lon: Optional[float] = None,
+                       radius_km: float = 5.0):
+    """All records, or only those near a location if lat/lon given.
+    Nearby records are returned nearest-first with distance attached."""
+    if lat is None or lon is None:
+        return {"total_records": len(BOREWELL_LOG), "records": BOREWELL_LOG}
+    nearby = []
+    for rec in BOREWELL_LOG:
+        d = _distance_km(lat, lon, rec["latitude"], rec["longitude"])
+        if d <= radius_km:
+            nearby.append({**rec, "distance_km": round(d, 2)})
+    nearby.sort(key=lambda x: x["distance_km"])
+    return {"total_records": len(nearby), "records": nearby, "radius_km": radius_km}

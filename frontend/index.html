@@ -64,7 +64,15 @@
   <!-- 1. Map picker -->
   <div class="card">
     <h3>📍 Pick a location</h3>
-    <p class="coords-note">Tap anywhere on the map — or type coordinates below.</p>
+    <p class="coords-note">Search a place, or tap anywhere on the map.</p>
+    <div class="row">
+      <div style="flex:3">
+        <input id="searchBox" type="text" placeholder="Search village / town / area (e.g. Anakapalle)" onkeydown="if(event.key==='Enter')searchPlace()" />
+      </div>
+      <div style="flex:1">
+        <button onclick="searchPlace()" style="margin-bottom:12px">🔍 Search</button>
+      </div>
+    </div>
     <div id="map"></div>
     <div class="row">
       <div>
@@ -112,11 +120,21 @@
     <h3>🌱 Crop Health Check (AI)</h3>
     <label>Describe the problem you see</label>
     <input id="farmerNote" type="text" placeholder="e.g. Yellow spots on cotton leaves, spreading fast" />
+    <label>Or upload a photo of the crop (Gemini Vision)</label>
+    <input id="cropPhoto" type="file" accept="image/*" />
     <button class="secondary" onclick="checkCropHealth()">Get AI Diagnosis</button>
     <div class="advice" id="cropHealthResult"></div>
   </div>
 
-  <!-- 4. Borewell logging (Digital Underground Twin) -->
+  <!-- 4. Nearby borewell records (Digital Underground Twin) -->
+  <div class="card">
+    <h3>🗃️ Nearby Borewell Records</h3>
+    <p class="coords-note">Existing records within 5 km of the selected location — what previous drillers found.</p>
+    <button class="secondary" onclick="loadNearbyRecords()">Show Nearby Records</button>
+    <div class="advice" id="nearbyRecords"></div>
+  </div>
+
+  <!-- 5. Borewell logging -->
   <div class="card">
     <h3>🕳️ Log a Borewell Record</h3>
     <p class="coords-note">Every record improves the advisory for nearby farmers — log one, then re-run the advisory above and watch the estimate change. Uses the location selected on the map.</p>
@@ -138,6 +156,16 @@
       <div>
         <label>Yield (litres/hour)</label>
         <input id="bwYield" type="number" value="2500" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Water quality — TDS (ppm, optional)</label>
+        <input id="bwTds" type="number" placeholder="e.g. 450" />
+      </div>
+      <div>
+        <label>Layer notes (optional)</label>
+        <input id="bwLayerNotes" type="text" placeholder="e.g. quartz traces at 180 ft" />
       </div>
     </div>
     <label>Operator name (optional)</label>
@@ -166,8 +194,79 @@ function setCoords(lat, lon) {
   document.getElementById('lat').value = lat.toFixed(4);
   document.getElementById('lon').value = lon.toFixed(4);
 }
-map.on('click', e => { marker.setLatLng(e.latlng); setCoords(e.latlng.lat, e.latlng.lng); });
-marker.on('dragend', () => { const p = marker.getLatLng(); setCoords(p.lat, p.lng); });
+map.on('click', e => { marker.setLatLng(e.latlng); setCoords(e.latlng.lat, e.latlng.lng); reverseGeocode(e.latlng.lat, e.latlng.lng); });
+marker.on('dragend', () => { const p = marker.getLatLng(); setCoords(p.lat, p.lng); reverseGeocode(p.lat, p.lng); });
+
+// ---------- Place search (OpenStreetMap Nominatim, free) ----------
+async function searchPlace() {
+  const q = document.getElementById('searchBox').value.trim();
+  if (!q) return;
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=1&q=${encodeURIComponent(q)}`,
+      { headers: { 'Accept-Language': 'en' } });
+    const results = await res.json();
+    if (!results.length) { toast('Place not found — try a nearby town name'); return; }
+    const r = results[0];
+    const lat = parseFloat(r.lat), lon = parseFloat(r.lon);
+    marker.setLatLng([lat, lon]);
+    map.setView([lat, lon], 13);
+    setCoords(lat, lon);
+    document.getElementById('village').value = r.display_name.split(',').slice(0, 2).join(',');
+  } catch (e) { toast('Search failed — check internet'); }
+}
+
+// ---------- Reverse geocode: auto-fill village name on map tap ----------
+async function reverseGeocode(lat, lon) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14`,
+      { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    const a = data.address || {};
+    const place = a.village || a.town || a.suburb || a.city_district || a.city || '';
+    const district = a.state_district || a.county || '';
+    if (place) document.getElementById('village').value = district ? `${place}, ${district}` : place;
+  } catch (e) { /* silent — village stays manual */ }
+}
+
+// ---------- Nearby borewell records ----------
+async function loadNearbyRecords() {
+  const out = document.getElementById('nearbyRecords');
+  const c = currentCoords();
+  out.textContent = 'Loading…';
+  try {
+    const res = await fetch(`${API}/api/v1/borewell-log?lat=${c.latitude}&lon=${c.longitude}&radius_km=5`);
+    const data = await res.json();
+    if (!data.records.length) {
+      out.innerHTML = 'No records within 5 km yet — this area is unmapped. Log the first one below!';
+      return;
+    }
+    out.innerHTML = data.records.map(r => `
+      <div style="border-bottom:1px solid #eee; padding:8px 0">
+        <strong>${r.distance_km} km away</strong> · Drilled ${r.depth_ft} ft ·
+        ${r.water_strike_depth_ft ? 'Water at <strong>' + r.water_strike_depth_ft + ' ft</strong>' : 'No water found'}
+        ${r.yield_lph ? ' · ' + r.yield_lph + ' L/hr' : ''}
+        ${r.water_quality_tds_ppm ? ' · TDS ' + r.water_quality_tds_ppm + ' ppm' : ''}
+        <br><span style="color:var(--muted); font-size:0.8rem">Soil: ${r.soil_layers}${r.layer_notes ? ' · ' + r.layer_notes : ''}${r.operator_name ? ' · by ' + r.operator_name : ''}</span>
+      </div>`).join('');
+    data.records.forEach(r => {
+      L.circleMarker([r.latitude, r.longitude], { radius: 7, color: '#6d4c41', fillColor: '#8d6e63', fillOpacity: 0.9 })
+        .bindPopup(`Borewell · ${r.water_strike_depth_ft ? 'water at ' + r.water_strike_depth_ft + ' ft' : 'dry'}`)
+        .addTo(borewellLayer);
+    });
+  } catch (e) { out.textContent = '⚠️ Backend not reachable.'; }
+}
+
+// ---------- Read uploaded photo as base64 ----------
+function readPhotoBase64() {
+  return new Promise(resolve => {
+    const f = document.getElementById('cropPhoto').files[0];
+    if (!f) return resolve(null);
+    const reader = new FileReader();
+    reader.onload = () => resolve({ data: reader.result.split(',')[1], mime: f.type || 'image/jpeg' });
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(f);
+  });
+}
 
 function currentCoords() {
   return {
@@ -233,7 +332,19 @@ async function getDrySpell() {
   out.textContent = 'Checking…';
   try {
     const data = await post('/api/v1/dry-spell-alert', currentCoords());
-    out.innerHTML = `<strong>Risk: ${data.dry_spell_risk}</strong> — ${data.message}`;
+    let forecastRow = '';
+    if (data.daily_forecast) {
+      forecastRow = '<div style="display:flex; gap:6px; margin-top:8px; overflow-x:auto">' +
+        data.daily_forecast.map(d => `
+          <div style="background:var(--green-light); border-radius:8px; padding:6px 8px; text-align:center; min-width:74px">
+            <div style="font-size:0.7rem; color:var(--muted)">${d.date.slice(5)}</div>
+            <div style="font-size:0.85rem; font-weight:600">${d.rain_mm ?? 0} mm</div>
+            <div style="font-size:0.7rem">${d.temp_max_c}°C</div>
+          </div>`).join('') + '</div>';
+    }
+    out.innerHTML = `<strong>Risk: ${data.dry_spell_risk}</strong> — ${data.message}
+      ${forecastRow}
+      <div class="source-note">Forecast: ${data.forecast_source || 'demo model'}</div>`;
   } catch (e) { out.textContent = '⚠️ Backend not reachable.'; }
 }
 
@@ -242,13 +353,16 @@ async function checkCropHealth() {
   const out = document.getElementById('cropHealthResult');
   out.textContent = 'Analyzing…';
   try {
+    const photo = await readPhotoBase64();
     const data = await post('/api/v1/crop-health', {
       ...currentCoords(),
       farmer_note: document.getElementById('farmerNote').value || null,
       language: document.getElementById('language').value,
+      photo_base64: photo ? photo.data : null,
+      photo_mime: photo ? photo.mime : 'image/jpeg',
     });
     out.innerHTML = `
-      <strong>Diagnosis (${data.ai_source === 'gemini' ? 'Gemini AI' : 'demo model'}):</strong> ${data.ai_preliminary_diagnosis}<br>
+      <strong>Diagnosis (${data.ai_source.startsWith('gemini') ? (data.ai_source === 'gemini-vision' ? 'Gemini Vision' : 'Gemini AI') : 'demo model'}):</strong> ${data.ai_preliminary_diagnosis}<br>
       Confidence: ${Math.round(data.confidence * 100)}%
       ${data.routed_to_rythu_seva_kendra ? `<br>📮 Routed to: ${data.nearest_kendra}` : ''}
     `;
@@ -267,6 +381,8 @@ async function logBorewell() {
       water_strike_depth_ft: parseFloat(document.getElementById('bwStrike').value) || null,
       yield_lph: parseFloat(document.getElementById('bwYield').value) || null,
       operator_name: document.getElementById('bwOperator').value || null,
+      water_quality_tds_ppm: parseFloat(document.getElementById('bwTds').value) || null,
+      layer_notes: document.getElementById('bwLayerNotes').value || null,
     });
     out.innerHTML = `✅ Logged. Total records in the Digital Underground Twin: <strong>${data.total_records}</strong>. Now re-run the advisory above — the estimate will use this record.`;
     L.circleMarker([coords.latitude, coords.longitude], {

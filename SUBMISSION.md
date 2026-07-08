@@ -28,10 +28,18 @@ Most crop-advisory tools give regional, static advice. GeoPulse AI's recommendat
 
 ## Tech Stack
 - **Backend:** FastAPI (Python), PostgreSQL/PostGIS for geospatial data
-- **AI/ML:** Rule-based scoring model for MVP (groundwater probability, crop suitability); roadmap to XGBoost/LightGBM trained on Agmarknet + CGWB groundwater data + satellite rainfall data
+- **AI:** Google Gemini (advisory generation in Telugu/Hindi/English + crop-photo diagnosis via Gemini Vision); rule-based groundwater scoring blended live with crowdsourced records; roadmap to XGBoost/LightGBM trained on Agmarknet + CGWB + satellite rainfall data
+- **Live data:** Open-Meteo 7-day forecast for dry-spell alerts; OpenStreetMap Nominatim for place search/reverse geocoding
 - **Frontend:** React Native (Expo) for the farmer app; simple web dashboard for government/analytics view
 - **Alerts:** SMS/voice gateway integration (e.g., Twilio/Exotel-style) for non-smartphone reach
 - **Data sources (roadmap):** Central Ground Water Board (CGWB) records, Agmarknet, satellite rainfall/terrain APIs, crowdsourced drilling logs
+
+## Roadmap (Beyond the Hackathon)
+- **Soil Health Card integration:** farmers upload their government Soil Health Card (photo/PDF); Gemini extracts NPK, pH, and micronutrient values to sharpen crop recommendations.
+- **IoT sensor ingestion:** plug-in soil moisture / water level probes streaming directly into the Digital Underground Twin.
+- **Per-layer soil testing reports:** structured lab reports attached to each drilled layer — enabling detection of mineral and rare-earth indicators from the same crowdsourced drilling data, opening a second (exploration) revenue stream.
+- **Water quality module:** TDS logging is live in the MVP; roadmap adds full potability lab-report uploads and quality maps for drinking vs irrigation suitability.
+- **Trained ML models:** replace the baseline estimator with XGBoost/LightGBM trained on CGWB + Agmarknet + satellite rainfall data.
 
 ## Impact
 - **Farmers:** avoid wasted borewell spend, get crop choices grounded in real soil/water data, timely irrigation alerts
